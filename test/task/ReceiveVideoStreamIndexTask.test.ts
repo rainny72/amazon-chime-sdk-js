@@ -4,6 +4,12 @@
 import * as chai from 'chai';
 import * as sinon from 'sinon';
 
+import {
+  AllHighestVideoBandwidthPolicy,
+  DefaultSimulcastUplinkPolicy,
+  NScaleVideoUplinkBandwidthPolicy,
+  VideoAdaptiveProbePolicy,
+} from '../../src';
 import AudioVideoControllerState from '../../src/audiovideocontroller/AudioVideoControllerState';
 import NoOpAudioVideoController from '../../src/audiovideocontroller/NoOpAudioVideoController';
 import AudioVideoObserver from '../../src/audiovideoobserver/AudioVideoObserver';
@@ -16,6 +22,7 @@ import {
   SdkIndexFrame,
   SdkSignalFrame,
   SdkStreamDescriptor,
+  SdkStreamMediaType,
   SdkStreamServiceType,
 } from '../../src/signalingprotocol/SignalingProtocol.js';
 import ReceiveVideoStreamIndexTask from '../../src/task/ReceiveVideoStreamIndexTask';
@@ -72,6 +79,7 @@ describe('ReceiveVideoStreamIndexTask', () => {
     streamDescriptor.attendeeId = attendeeId;
     streamDescriptor.groupId = groupId;
     streamDescriptor.streamId = streamId;
+    streamDescriptor.mediaType = SdkStreamMediaType.VIDEO;
     streamDescriptor.maxBitrateKbps = maxBitrateKbps;
     streamDescriptor.avgBitrateBps = avgBitrateBps;
     return streamDescriptor;
@@ -441,6 +449,96 @@ describe('ReceiveVideoStreamIndexTask', () => {
         done();
       });
 
+      task.run();
+    });
+  });
+
+  describe('observer on remote sending videos change', () => {
+    interface ResultItemType {
+      attendeeId: string;
+      externalUserId: string;
+    }
+    const compare = (a: ResultItemType, b: ResultItemType): number =>
+      a.attendeeId.localeCompare(b.attendeeId);
+
+    it('with NScaleVideoUplinkBandwidthPolicy (uplink) and AllHighestVideoBandwidthPolicy (downlink)', done => {
+      const selfAttendeeId = 'attendee-1';
+      context.audioVideoController.configuration.credentials.attendeeId = selfAttendeeId;
+      context.videoUplinkBandwidthPolicy = new NScaleVideoUplinkBandwidthPolicy(selfAttendeeId);
+      context.videoDownlinkBandwidthPolicy = new AllHighestVideoBandwidthPolicy(selfAttendeeId);
+      let calledTimes = 0;
+      class TestObserver implements AudioVideoObserver {
+        remoteVideosAvailableDidChange(
+          attendees: { attendeeId: string; externalUserId: string }[]
+        ): void {
+          calledTimes += 1;
+          expect(attendees.sort(compare)).to.deep.equal(
+            [
+              { attendeeId: 'attendee-2', externalUserId: '' },
+              { attendeeId: 'attendee-3', externalUserId: '' },
+            ].sort(compare)
+          );
+        }
+      }
+      context.audioVideoController.addObserver(new TestObserver());
+      const streamDescriptor1 = createStreamDescriptor('attendee-1', 1, 1, 48, 24000);
+      const streamDescriptor2 = createStreamDescriptor('attendee-2', 2, 2, 48, 24000);
+      const streamDescriptor3 = createStreamDescriptor('attendee-3', 3, 3, 48, 24000);
+      const indexSignalBuffer = createIndexSignalBuffer(false, null, [
+        streamDescriptor1,
+        streamDescriptor2,
+        streamDescriptor3,
+      ]);
+      new TimeoutScheduler(behavior.asyncWaitMs).start(async () => {
+        webSocketAdapter.send(indexSignalBuffer);
+        await new Promise(resolve =>
+          new TimeoutScheduler(behavior.asyncWaitMs + 10).start(resolve)
+        );
+        expect(calledTimes).to.equal(1);
+        done();
+      });
+      task.run();
+    });
+
+    it('with SimulcastUplinkPolicy (uplink) and VideoAdaptiveProbePolicy (downlink)', done => {
+      const selfAttendeeId = 'attendee-1';
+      context.audioVideoController.configuration.credentials.attendeeId = selfAttendeeId;
+      context.videoUplinkBandwidthPolicy = new DefaultSimulcastUplinkPolicy(selfAttendeeId, logger);
+      context.videoDownlinkBandwidthPolicy = new VideoAdaptiveProbePolicy(
+        logger,
+        context.videoTileController
+      );
+      let calledTimes = 0;
+      class TestObserver implements AudioVideoObserver {
+        remoteVideosAvailableDidChange(
+          attendees: { attendeeId: string; externalUserId: string }[]
+        ): void {
+          calledTimes += 1;
+          expect(attendees.sort(compare)).to.deep.equal(
+            [
+              { attendeeId: 'attendee-2', externalUserId: '' },
+              { attendeeId: 'attendee-3', externalUserId: '' },
+            ].sort(compare)
+          );
+        }
+      }
+      context.audioVideoController.addObserver(new TestObserver());
+      const streamDescriptor1 = createStreamDescriptor('attendee-1', 1, 1, 48, 24000);
+      const streamDescriptor2 = createStreamDescriptor('attendee-2', 2, 2, 48, 24000);
+      const streamDescriptor3 = createStreamDescriptor('attendee-3', 3, 3, 48, 24000);
+      const indexSignalBuffer = createIndexSignalBuffer(false, null, [
+        streamDescriptor1,
+        streamDescriptor2,
+        streamDescriptor3,
+      ]);
+      new TimeoutScheduler(behavior.asyncWaitMs).start(async () => {
+        webSocketAdapter.send(indexSignalBuffer);
+        await new Promise(resolve =>
+          new TimeoutScheduler(behavior.asyncWaitMs + 10).start(resolve)
+        );
+        expect(calledTimes).to.equal(1);
+        done();
+      });
       task.run();
     });
   });

@@ -15,6 +15,8 @@ import ContentShareObserver from '../../src/contentshareobserver/ContentShareObs
 import DataMessage from '../../src/datamessage/DataMessage';
 import DeviceChangeObserver from '../../src/devicechangeobserver/DeviceChangeObserver';
 import NoOpDeviceController from '../../src/devicecontroller/NoOpDeviceController';
+import SimulcastLayers from '../../src/simulcastlayers/SimulcastLayers';
+import SimulcastUplinkObserver from '../../src/videouplinkbandwidthpolicy/SimulcastUplinkObserver';
 import DOMMockBuilder from '../dommock/DOMMockBuilder';
 
 describe('DefaultAudioVideoFacade', () => {
@@ -589,6 +591,30 @@ describe('DefaultAudioVideoFacade', () => {
       const observer = new NoOpContentShareObserver();
       facade.removeContentShareObserver(observer);
       expect(spy.withArgs(observer).calledOnce).to.be.true;
+    });
+
+    it('will call getRemoteVideosAvailable', () => {
+      const spy = sinon.spy(controller, 'getRemoteVideosAvailable');
+      facade.getRemoteVideosAvailable();
+      assert(spy.calledOnceWith());
+    });
+
+    it('will call addSimulcastUplinkPolicyObserver', () => {
+      class Test implements SimulcastUplinkObserver {
+        encodingSimulcastLayerDidChange(_simulcastLayer: SimulcastLayers): void {}
+      }
+      const spy = sinon.spy(controller, 'addSimulcastUplinkPolicyObserver');
+      facade.addSimulcastUplinkPolicyObserver(new Test());
+      expect(spy.calledOnce).to.be.true;
+    });
+
+    it('will call removeSimulcastUplinkPolicyObserver', () => {
+      class Test implements SimulcastUplinkObserver {
+        encodingSimulcastLayerDidChange(_simulcastLayer: SimulcastLayers): void {}
+      }
+      const spy = sinon.spy(controller, 'removeSimulcastUplinkPolicyObserver');
+      facade.removeSimulcastUplinkPolicyObserver(new Test());
+      expect(spy.calledOnce).to.be.true;
     });
   });
 });

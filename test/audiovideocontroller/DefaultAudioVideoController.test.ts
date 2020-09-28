@@ -26,11 +26,16 @@ import {
   SdkJoinAckFrame,
   SdkLeaveAckFrame,
   SdkSignalFrame,
+  SdkStreamDescriptor,
+  SdkStreamMediaType,
   SdkSubscribeAckFrame,
   SdkTurnCredentials,
 } from '../../src/signalingprotocol/SignalingProtocol.js';
+import SimulcastLayers from '../../src/simulcastlayers/SimulcastLayers';
 import AllHighestVideoBandwidthPolicy from '../../src/videodownlinkbandwidthpolicy/AllHighestVideoBandwidthPolicy';
 import NScaleVideoUplinkBandwidthPolicy from '../../src/videouplinkbandwidthpolicy/NScaleVideoUplinkBandwidthPolicy';
+import SimulcastUplinkObserver from '../../src/videouplinkbandwidthpolicy/SimulcastUplinkObserver';
+import SimulcastUplinkPolicy from '../../src/videouplinkbandwidthpolicy/SimulcastUplinkPolicy';
 import DefaultWebSocketAdapter from '../../src/websocketadapter/DefaultWebSocketAdapter';
 import DOMMockBehavior from '../dommock/DOMMockBehavior';
 import DOMMockBuilder from '../dommock/DOMMockBuilder';
@@ -102,8 +107,11 @@ describe('DefaultAudioVideoController', () => {
     return joinAckSignalBuffer;
   }
 
-  function makeIndexFrame(): Uint8Array {
+  function makeIndexFrame(sources?: SdkStreamDescriptor[]): Uint8Array {
     const indexFrame = SdkIndexFrame.create();
+    if (sources) {
+      indexFrame.sources = sources;
+    }
     const indexSignal = SdkSignalFrame.create();
     indexSignal.type = SdkSignalFrame.Type.INDEX;
     indexSignal.index = indexFrame;
@@ -113,6 +121,19 @@ describe('DefaultAudioVideoController', () => {
     indexSignalBuffer.set(buffer, 1);
     return indexSignalBuffer;
   }
+
+  const makeIndexFrameWithAttendees = (
+    attendees: { attendeeId: string; externalUserId: string }[]
+  ): Uint8Array => {
+    const sources = attendees.map(({ attendeeId, externalUserId }) => {
+      const streamDescriptor = SdkStreamDescriptor.create();
+      streamDescriptor.attendeeId = attendeeId;
+      streamDescriptor.externalUserId = externalUserId;
+      streamDescriptor.mediaType = SdkStreamMediaType.VIDEO;
+      return streamDescriptor;
+    });
+    return makeIndexFrame(sources);
+  };
 
   // For SubscribeAndReceiveSubscribeAckTask
   function makeSubscribeAckFrame(): Uint8Array {
@@ -1744,6 +1765,205 @@ describe('DefaultAudioVideoController', () => {
       await sendICEEventAndSubscribeAckFrame();
 
       await stop();
+    });
+  });
+
+  describe('getRemoteVideosAvailable', () => {
+    interface ResultItemType {
+      attendeeId: string;
+      externalUserId: string;
+    }
+    const compare = (a: ResultItemType, b: ResultItemType): number =>
+      a.attendeeId.localeCompare(b.attendeeId);
+
+    it('should match index frame sources excluding self', async () => {
+      const expectedAttendees = [{ attendeeId: 'a', externalUserId: 'a' }];
+      audioVideoController = new DefaultAudioVideoController(
+        configuration,
+        new NoOpDebugLogger(),
+        webSocketAdapter,
+        new NoOpDeviceController(),
+        reconnectController
+      );
+      await start();
+      await delay(300);
+      webSocketAdapter.send(makeIndexFrameWithAttendees(expectedAttendees));
+      await delay(300);
+      const attendees = audioVideoController.getRemoteVideosAvailable();
+      expect(attendees.sort(compare)).to.eql(expectedAttendees.sort(compare));
+      await stop();
+    });
+
+    it('should return an array of length 0, when videoStreamIndex is not initialized', async () => {
+      audioVideoController = new DefaultAudioVideoController(
+        configuration,
+        new NoOpDebugLogger(),
+        webSocketAdapter,
+        new NoOpDeviceController(),
+        reconnectController
+      );
+      const attendees = audioVideoController.getRemoteVideosAvailable();
+      expect(attendees).to.have.lengthOf(0);
+    });
+  });
+
+  describe('remoteVideosAvailableDidChange observer', () => {
+    it('observer should get called only when added', async () => {
+      audioVideoController = new DefaultAudioVideoController(
+        configuration,
+        new NoOpDebugLogger(),
+        webSocketAdapter,
+        new NoOpMediaStreamBroker(),
+        reconnectController
+      );
+      let event = 0;
+      let observed = 0;
+      class TestObserver implements AudioVideoObserver {
+        remoteVideosAvailableDidChange(
+          _attendees: { attendeeId: string; externalUserId: string }[]
+        ): void {
+          if (event !== 1 && event !== 3 && event !== 5) {
+            assert.fail();
+          }
+          observed += 1;
+        }
+      }
+      const observer = new TestObserver();
+      await delay();
+      audioVideoController.addObserver(observer);
+      event += 1;
+      audioVideoController.forEachObserver((observer: AudioVideoObserver) => {
+        observer.remoteVideosAvailableDidChange([]);
+      });
+      await delay();
+      audioVideoController.removeObserver(observer);
+      event += 1;
+      audioVideoController.forEachObserver((observer: AudioVideoObserver) => {
+        observer.remoteVideosAvailableDidChange([]);
+      });
+      await delay();
+      audioVideoController.addObserver(observer);
+      event += 1;
+      audioVideoController.forEachObserver((observer: AudioVideoObserver) => {
+        observer.remoteVideosAvailableDidChange([]);
+      });
+      await delay();
+      event += 1;
+      audioVideoController.forEachObserver((observer: AudioVideoObserver) => {
+        observer.remoteVideosAvailableDidChange([]);
+      });
+      audioVideoController.removeObserver(observer);
+      await delay();
+      audioVideoController.addObserver(observer);
+      event += 1;
+      audioVideoController.forEachObserver((observer: AudioVideoObserver) => {
+        observer.remoteVideosAvailableDidChange([]);
+      });
+      await delay();
+      expect(event).to.equal(5);
+      expect(observed).to.equal(3);
+    });
+  });
+
+  describe('addSimulcastUplinkPolicyObserver', () => {
+    it('adds SimulcastObserver in videoUplinkBandwidthPolicy', async () => {
+      configuration.enableUnifiedPlanForChromiumBasedBrowsers = true;
+      configuration.enableSimulcastForUnifiedPlanChromiumBasedBrowsers = true;
+      domMockBehavior.browserName = 'chrome';
+      domMockBuilder = new DOMMockBuilder(domMockBehavior);
+      audioVideoController = new DefaultAudioVideoController(
+        configuration,
+        new NoOpDebugLogger(),
+        webSocketAdapter,
+        new NoOpDeviceController(),
+        reconnectController
+      );
+      await start();
+      // @ts-ignore
+      const policy: SimulcastUplinkPolicy = audioVideoController.meetingSessionContext
+        .videoUplinkBandwidthPolicy as SimulcastUplinkPolicy;
+      const spy = sinon.spy(policy, 'addObserver');
+      class Test implements SimulcastUplinkObserver {
+        encodingSimulcastLayerDidChange(_simulcastLayer: SimulcastLayers): void {}
+      }
+      audioVideoController.addSimulcastUplinkPolicyObserver(new Test());
+      await stop();
+      expect(spy.calledOnce).to.be.true;
+    });
+
+    it('logs warning when adding simulcast uplink observer on a non-simulcast uplink policy', async () => {
+      const logger = new NoOpDebugLogger();
+      const spy = sinon.spy(logger, 'warn');
+      audioVideoController = new DefaultAudioVideoController(
+        configuration,
+        logger,
+        webSocketAdapter,
+        new NoOpDeviceController(),
+        reconnectController
+      );
+      await start();
+      class Test implements SimulcastUplinkObserver {
+        encodingSimulcastLayerDidChange(_simulcastLayer: SimulcastLayers): void {}
+      }
+      audioVideoController.addSimulcastUplinkPolicyObserver(new Test());
+      await stop();
+      expect(
+        spy.calledWith(
+          sinon.match('tried to add simulcast uplink policy observer on a non-simulcast policy')
+        )
+      ).to.be.true;
+    });
+  });
+
+  describe('removeSimulcastUplinkPolicyObserver', () => {
+    it('removes SimulcastObserver in videoUplinkBandwidthPolicy', async () => {
+      configuration.enableUnifiedPlanForChromiumBasedBrowsers = true;
+      configuration.enableSimulcastForUnifiedPlanChromiumBasedBrowsers = true;
+      domMockBehavior.browserName = 'chrome';
+      domMockBuilder = new DOMMockBuilder(domMockBehavior);
+      audioVideoController = new DefaultAudioVideoController(
+        configuration,
+        new NoOpDebugLogger(),
+        webSocketAdapter,
+        new NoOpDeviceController(),
+        reconnectController
+      );
+      await start();
+      // @ts-ignore
+      const policy: SimulcastUplinkPolicy = audioVideoController.meetingSessionContext
+        .videoUplinkBandwidthPolicy as SimulcastUplinkPolicy;
+      const spy = sinon.spy(policy, 'removeObserver');
+      class Test implements SimulcastUplinkObserver {
+        encodingSimulcastLayerDidChange(_simulcastLayer: SimulcastLayers): void {}
+      }
+      audioVideoController.removeSimulcastUplinkPolicyObserver(new Test());
+      await stop();
+      expect(spy.calledOnce).to.be.true;
+    });
+
+    it('logs warning when removing simulcast uplink observer from a non-simulcast uplink policy', async () => {
+      const logger = new NoOpDebugLogger();
+      const spy = sinon.spy(logger, 'warn');
+      audioVideoController = new DefaultAudioVideoController(
+        configuration,
+        logger,
+        webSocketAdapter,
+        new NoOpDeviceController(),
+        reconnectController
+      );
+      await start();
+      class Test implements SimulcastUplinkObserver {
+        encodingSimulcastLayerDidChange(_simulcastLayer: SimulcastLayers): void {}
+      }
+      audioVideoController.removeSimulcastUplinkPolicyObserver(new Test());
+      await stop();
+      expect(
+        spy.calledWith(
+          sinon.match(
+            'tried to remove simulcast uplink policy observer from a non-simulcast policy'
+          )
+        )
+      ).to.be.true;
     });
   });
 });

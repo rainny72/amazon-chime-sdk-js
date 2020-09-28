@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Add a Travis check to make sure version update
 - Add metrics for Selenium initialization metrics for integration tests
+- Add simulcast uplink policy layer change notification methods and observers
+- Add remote videos available observer and method
 
 ### Changed
 - Update test results to Sauce Labs before emitting CloudWatch metrics for integration tests

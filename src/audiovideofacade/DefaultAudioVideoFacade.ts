@@ -17,6 +17,7 @@ import VideoQualitySettings from '../devicecontroller/VideoQualitySettings';
 import RealtimeController from '../realtimecontroller/RealtimeController';
 import VideoTile from '../videotile/VideoTile';
 import VideoTileController from '../videotilecontroller/VideoTileController';
+import SimulcastUplinkObserver from '../videouplinkbandwidthpolicy/SimulcastUplinkObserver';
 
 export default class DefaultAudioVideoFacade implements AudioVideoFacade {
   constructor(
@@ -458,5 +459,21 @@ export default class DefaultAudioVideoFacade implements AudioVideoFacade {
       s += ` -> ${JSON.stringify(output)}`;
     }
     this.audioVideoController.logger.info(s);
+  }
+
+  getRemoteVideosAvailable(): { attendeeId: string; externalUserId: string }[] {
+    const result = this.audioVideoController.getRemoteVideosAvailable();
+    this.trace('getRemoteVideosAvailable', null, result);
+    return result;
+  }
+
+  addSimulcastUplinkPolicyObserver(observer: SimulcastUplinkObserver): void {
+    this.audioVideoController.addSimulcastUplinkPolicyObserver(observer);
+    this.trace('addSimulcastUplinkPolicyObserver');
+  }
+
+  removeSimulcastUplinkPolicyObserver(observer: SimulcastUplinkObserver): void {
+    this.audioVideoController.removeSimulcastUplinkPolicyObserver(observer);
+    this.trace('removeSimulcastUplinkPolicyObserver');
   }
 }

@@ -64,7 +64,9 @@ import SimulcastVideoStreamIndex from '../videostreamindex/SimulcastVideoStreamI
 import DefaultVideoTileController from '../videotilecontroller/DefaultVideoTileController';
 import VideoTileController from '../videotilecontroller/VideoTileController';
 import DefaultVideoTileFactory from '../videotilefactory/DefaultVideoTileFactory';
+import DefaultSimulcastUplinkPolicy from '../videouplinkbandwidthpolicy/DefaultSimulcastUplinkPolicy';
 import NScaleVideoUplinkBandwidthPolicy from '../videouplinkbandwidthpolicy/NScaleVideoUplinkBandwidthPolicy';
+import SimulcastUplinkObserver from '../videouplinkbandwidthpolicy/SimulcastUplinkObserver';
 import SimulcastUplinkPolicy from '../videouplinkbandwidthpolicy/SimulcastUplinkPolicy';
 import DefaultVolumeIndicatorAdapter from '../volumeindicatoradapter/DefaultVolumeIndicatorAdapter';
 import WebSocketAdapter from '../websocketadapter/WebSocketAdapter';
@@ -237,10 +239,10 @@ export default class DefaultAudioVideoController implements AudioVideoController
 
     this.meetingSessionContext.enableSimulcast = this.enableSimulcast;
     if (this.enableSimulcast) {
-      this.meetingSessionContext.videoUplinkBandwidthPolicy = new SimulcastUplinkPolicy(
+      this.meetingSessionContext.videoUplinkBandwidthPolicy = new DefaultSimulcastUplinkPolicy(
         this.configuration.credentials.attendeeId,
         this.meetingSessionContext.logger
-      );
+      ) as SimulcastUplinkPolicy;
       this.meetingSessionContext.videoDownlinkBandwidthPolicy = new VideoAdaptiveProbePolicy(
         this.logger,
         this.meetingSessionContext.videoTileController
@@ -737,6 +739,43 @@ export default class DefaultAudioVideoController implements AudioVideoController
   resumeReceivingStream(streamId: number): void {
     if (!!this.meetingSessionContext && this.meetingSessionContext.signalingClient) {
       this.meetingSessionContext.signalingClient.resume([streamId]);
+    }
+  }
+
+  getRemoteVideosAvailable(): { attendeeId: string; externalUserId: string }[] {
+    if (!this.meetingSessionContext.videoStreamIndex) {
+      this.logger.info('meeting session context has no video stream index');
+      return [];
+    }
+    const selfAttendeeId = this.configuration.credentials.attendeeId;
+    const videoStreamIndex = this.meetingSessionContext.videoStreamIndex;
+    return videoStreamIndex.allVideoSendingAttendeesExcludingSelf(selfAttendeeId);
+  }
+
+  addSimulcastUplinkPolicyObserver(observer: SimulcastUplinkObserver): void {
+    if (
+      this.enableSimulcast &&
+      'addObserver' in this.meetingSessionContext.videoUplinkBandwidthPolicy
+    ) {
+      (this.meetingSessionContext.videoUplinkBandwidthPolicy as SimulcastUplinkPolicy).addObserver(
+        observer
+      );
+    } else {
+      this.logger.warn(`tried to add simulcast uplink policy observer on a non-simulcast policy`);
+    }
+  }
+
+  removeSimulcastUplinkPolicyObserver(observer: SimulcastUplinkObserver): void {
+    if (
+      this.enableSimulcast &&
+      'removeObserver' in this.meetingSessionContext.videoUplinkBandwidthPolicy
+    ) {
+      (this.meetingSessionContext
+        .videoUplinkBandwidthPolicy as SimulcastUplinkPolicy).removeObserver(observer);
+    } else {
+      this.logger.warn(
+        `tried to remove simulcast uplink policy observer from a non-simulcast policy`
+      );
     }
   }
 }
