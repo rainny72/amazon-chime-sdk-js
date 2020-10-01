@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Add a Travis check to make sure version update
 - Add metrics for Selenium initialization metrics for integration tests
+- Add an optional parameter to the serverless demo deployment script to specify Chime endpoint, and deploy to a new devo stage that talks to gamma Chime endpoint for canary
 
 ### Changed
 - Update test results to Sauce Labs before emitting CloudWatch metrics for integration tests
